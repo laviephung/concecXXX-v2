@@ -1,6 +1,7 @@
 // src/scheduler.ts
 // Lịch đăng bài theo 2 khung giờ, mỗi video cách nhau 30-60 phút (Random Delay)
 // Đã cải tiến: Tích hợp Watcher cho Sync-to-VPS, Random Delay, Đăng bài văn bản xen kẽ, Kiểm tra Shadowban
+// FIX: Thêm delay giữa bài đăng văn bản và video để tránh bị X quét spam (lỗi 29s)
 
 import cron from "node-cron";
 import { config } from "./config";
@@ -70,6 +71,16 @@ async function publishNextInQueue() {
       const funnyText = await generateFunnyText();
       if (funnyText) {
         await publishTextOnly(funnyText);
+        
+        // 🛡️ FIX: Sau khi đăng bài văn bản, phải NGHỈ một khoảng thời gian rồi mới đăng video
+        // Khoảng nghỉ này bằng 50% - 100% của publishIntervalMinutes để đảm bảo an toàn
+        const baseDelayMs = config.publishIntervalMinutes * 60 * 1000;
+        const randomFactor = 0.5 + Math.random() * 0.5; // 50% đến 100%
+        const delayMs = Math.floor(baseDelayMs * randomFactor);
+        
+        logger.info(`Đã đăng bài văn bản. Nghỉ ${(delayMs / 60000).toFixed(1)} phút trước khi đăng video tiếp theo...`);
+        publishTimer = setTimeout(publishNextInQueue, delayMs);
+        return; // Thoát ra để chờ đợi, không đăng video ngay lập tức
       }
     }
 
@@ -184,7 +195,7 @@ export function startScheduler() {
   });
 
   logger.success(
-    `Scheduler v2.2 khởi động:\n` +
+    `Scheduler v2.3 (FIXED Delay):\n` +
     `  🔍 Watcher Sync : mỗi 1 phút\n` +
     `  📝 Tạo caption  : mỗi 2 phút\n` +
     `  📤 Khung sáng   : ${slot1Hour}:00 → ${slot1Videos} video\n` +
