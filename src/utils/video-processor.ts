@@ -1,6 +1,6 @@
 // src/utils/video-processor.ts
 // Xử lý video: Che logo cũ, chèn overlay thương hiệu @0xFly_
-// Sử dụng ffmpeg để chèn 2 dải màu đen (hoặc ảnh) vào phần trên và dưới của video Shorts (9:16)
+// Đã cải tiến v2.6: Tự động nhận diện kích thước video để căn chỉnh dải đen chuẩn xác hơn
 
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -12,11 +12,21 @@ const execAsync = promisify(exec);
 const logger = createLogger("VideoProcessor");
 
 /**
+ * Lấy kích thước video (width, height) bằng ffprobe
+ */
+async function getVideoDimensions(inputPath: string): Promise<{ width: number, height: number } | null> {
+  try {
+    const cmd = `ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${inputPath}"`;
+    const { stdout } = await execAsync(cmd);
+    const [width, height] = stdout.trim().split('x').map(Number);
+    return { width, height };
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
  * Che logo cũ bằng cách chèn 2 dải màu đen (hoặc ảnh) vào phần trên và dưới của video.
- * @param inputPath Đường dẫn video gốc
- * @param outputPath Đường dẫn video sau khi xử lý
- * @param topText Văn bản hiển thị ở dải trên (tùy chọn)
- * @param bottomText Văn bản hiển thị ở dải dưới (tùy chọn)
  */
 export async function maskVideo(
   inputPath: string, 
@@ -27,24 +37,30 @@ export async function maskVideo(
   try {
     logger.info(`Đang xử lý che logo cho video: ${path.basename(inputPath)}`);
 
-    // Lệnh ffmpeg:
-    // 1. Vẽ 2 hình chữ nhật đen (drawbox) ở trên và dưới để che logo cũ.
-    // 2. Chèn text (drawtext) vào 2 dải đen đó để làm thương hiệu.
-    // Giả sử video Shorts là 1080x1920 hoặc tương đương.
-    // Dải trên: cao khoảng 15% (h*0.15)
-    // Dải dưới: cao khoảng 15% (h*0.15)
+    // 1. Lấy kích thước thực tế của video
+    const dims = await getVideoDimensions(inputPath);
+    const h = dims?.height || 1920; // Fallback nếu lỗi
     
+    // 2. Tính toán độ dày dải đen (15% chiều cao mỗi dải là an toàn nhất)
+    const maskHeight = Math.floor(h * 0.15);
+    
+    // 3. Lệnh ffmpeg cải tiến:
+    // - Dùng drawbox để tạo dải đen
+    // - Dùng drawtext với font size linh hoạt theo chiều cao video
+    const fontSizeTop = Math.floor(h * 0.035);
+    const fontSizeBottom = Math.floor(h * 0.03);
+
     const ffmpegCmd = `ffmpeg -i "${inputPath}" -vf "` +
-      `drawbox=y=0:color=black@1:width=iw:height=ih*0.18:t=fill, ` +
-      `drawbox=y=ih-ih*0.18:color=black@1:width=iw:height=ih*0.18:t=fill, ` +
-      `drawtext=text='${topText}':fontcolor=white:fontsize=h*0.04:x=(w-text_w)/2:y=(ih*0.18-text_h)/2, ` +
-      `drawtext=text='${bottomText}':fontcolor=yellow:fontsize=h*0.035:x=(w-text_w)/2:y=ih-ih*0.18+(ih*0.18-text_h)/2" ` +
+      `drawbox=y=0:color=black@1:width=iw:height=${maskHeight}:t=fill, ` +
+      `drawbox=y=ih-${maskHeight}:color=black@1:width=iw:height=${maskHeight}:t=fill, ` +
+      `drawtext=text='${topText}':fontcolor=white:fontsize=${fontSizeTop}:x=(w-text_w)/2:y=(${maskHeight}-text_h)/2, ` +
+      `drawtext=text='${bottomText}':fontcolor=yellow:fontsize=${fontSizeBottom}:x=(w-text_w)/2:y=ih-${maskHeight}+(${maskHeight}-text_h)/2" ` +
       `-c:a copy -y "${outputPath}"`;
 
     await execAsync(ffmpegCmd);
     
     if (fs.existsSync(outputPath)) {
-      logger.success(`Đã xử lý xong video: ${path.basename(outputPath)}`);
+      logger.success(`Đã xử lý xong video (Mask: ${maskHeight}px): ${path.basename(outputPath)}`);
       return true;
     }
     return false;
