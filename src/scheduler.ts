@@ -1,7 +1,7 @@
 // src/scheduler.ts
 // Lịch đăng bài theo 2 khung giờ, mỗi video cách nhau 30-60 phút (Random Delay)
 // Đã cải tiến: Tích hợp Watcher cho Sync-to-VPS, Random Delay, Đăng bài văn bản xen kẽ, Kiểm tra Shadowban
-// FIX v2.7: Xuất hàm checkBan để Telegram Bot có thể gọi thủ công
+// FIX v3.1: Xử lý trạng thái nghi vấn (null) từ API Shadowban
 
 import cron from "node-cron";
 import { config } from "./config";
@@ -23,6 +23,7 @@ const tgBot = new TelegramBot(config.telegramBotToken);
 let publishQueue: { videosLeft: number; slotName: string } | null = null;
 let publishTimer: NodeJS.Timeout | null = null;
 let isShadowbanned = false; // Trạng thái Shadowban hiện tại
+let isSuspected = false;    // Trạng thái nghi vấn (null)
 let lastTextPostTime: number = 0; // Lưu thời điểm đăng bài văn bản gần nhất
 
 // ─── Đăng từng video trong queue theo interval ngẫu nhiên ──────────────────────
@@ -33,11 +34,11 @@ async function startPublishQueue(totalVideos: number, slotName: string) {
     return;
   }
 
-  // Nếu bị Shadowban, giảm số lượng video đăng xuống 1 bài/slot để "cứu" tài khoản
+  // Nếu bị Shadowban hoặc Nghi vấn, giảm số lượng video đăng xuống 1 bài/slot để "cứu" tài khoản
   let finalTotalVideos = totalVideos;
-  if (isShadowbanned) {
+  if (isShadowbanned || isSuspected) {
     finalTotalVideos = 1;
-    logger.warn(`⚠️ Đang bị Shadowban: Giảm số lượng video xuống còn ${finalTotalVideos} bài/slot.`);
+    logger.warn(`⚠️ Chế độ Safe Mode: Giảm số lượng video xuống còn ${finalTotalVideos} bài/slot.`);
   }
 
   logger.info(`Bắt đầu khung giờ ${slotName}: đăng ${finalTotalVideos} video, cách nhau ~${config.publishIntervalMinutes} phút`);
@@ -64,7 +65,8 @@ async function publishNextInQueue() {
 
   try {
     logger.info(`Đang đăng video (còn lại: ${publishQueue.videosLeft})`);
-    const ok = await publishOne(isShadowbanned); // Truyền trạng thái ban để xử lý hashtag
+    // Truyền trạng thái ban hoặc nghi vấn để xử lý hashtag
+    const ok = await publishOne(isShadowbanned || isSuspected); 
     if (!ok) {
       logger.warn("Không có video để đăng, kết thúc khung giờ sớm");
       publishQueue = null;
@@ -100,6 +102,7 @@ export async function checkBanNow() {
   const status = await checkShadowban(username);
   if (status) {
     isShadowbanned = status.is_banned;
+    isSuspected = status.is_suspected;
     return status;
   }
   return null;
@@ -116,24 +119,32 @@ export function startScheduler() {
   // ─── Kiểm tra Shadowban định kỳ ───────────────────────────────────────────
   const checkBanJob = async () => {
     const status = await checkBanNow();
-    if (status && status.is_banned) {
+    if (status && (status.is_banned || status.is_suspected)) {
       const banTypes = [];
       if (status.search_ban) banTypes.push("Search Ban");
       if (status.search_suggestion_ban) banTypes.push("Search Suggestion Ban");
       if (status.ghost_ban) banTypes.push("Ghost Ban");
       if (status.reply_deboosting) banTypes.push("Reply Deboosting");
       
+      let message = "";
+      if (status.is_banned) {
+        message = `🚨 *CẢNH BÁO SHADOWBAN!*\n\n` +
+                  `Tài khoản @0xFly_ đang bị: *${banTypes.join(", ")}*\n\n` +
+                  `🛡️ *Bot đã tự động kích hoạt Safe Mode:*\n` +
+                  `- Giảm số lượng video xuống 1 bài/slot.\n` +
+                  `- Tạm thời loại bỏ hashtag khỏi video.\n\n` +
+                  `🔗 Kiểm tra tại: https://shadowban.yuzurisa.com/0xFly_`;
+      } else {
+        message = `⚠️ *CẢNH BÁO NGHI VẤN (SUSPECTED)!*\n\n` +
+                  `API trả về giá trị *null* cho một số chỉ số. Có thể tài khoản đang bị "soi" hoặc API đang quét lại.\n\n` +
+                  `🛡️ *Bot đã kích hoạt Safe Mode để phòng ngừa:*\n` +
+                  `- Giảm số lượng video xuống 1 bài/slot.\n` +
+                  `- Tạm thời loại bỏ hashtag khỏi video.\n\n` +
+                  `🔗 Kiểm tra tại: https://shadowban.yuzurisa.com/0xFly_`;
+      }
+
       for (const adminId of config.adminUserIds) {
-        await tgBot.sendMessage(adminId, 
-          `🚨 *CẢNH BÁO SHADOWBAN!*\n\n` +
-          `Tài khoản @0xFly_ đang bị: *${banTypes.join(", ")}*\n\n` +
-          `🛡️ *Bot đã tự động kích hoạt Safe Mode:*\n` +
-          `- Giảm số lượng video xuống 1 bài/slot.\n` +
-          `- Tăng tỷ lệ bài đăng văn bản lên 50%.\n` +
-          `- Tạm thời loại bỏ hashtag khỏi video.\n\n` +
-          `🔗 Kiểm tra tại: https://shadowban.yuzurisa.com/0xFly_`,
-          { parse_mode: "Markdown" }
-        );
+        await tgBot.sendMessage(adminId, message, { parse_mode: "Markdown" });
       }
     }
   };
@@ -210,7 +221,7 @@ export function startScheduler() {
   });
 
   logger.success(
-    `Scheduler v2.7 (Manual Check Support):\n` +
+    `Scheduler v3.1 (Safe Mode Enhanced):\n` +
     `  🔍 Watcher Sync : mỗi 1 phút\n` +
     `  📝 Tạo caption  : mỗi 2 phút\n` +
     `  📤 Khung sáng   : ${slot1Hour}:00 → ${slot1Videos} video\n` +

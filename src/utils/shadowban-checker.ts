@@ -13,6 +13,7 @@ export interface ShadowbanStatus {
   ghost_ban: boolean;
   reply_deboosting: boolean;
   is_banned: boolean;
+  is_suspected: boolean; // Trạng thái nghi vấn khi API trả về null
 }
 
 export async function checkShadowban(username: string): Promise<ShadowbanStatus | null> {
@@ -36,24 +37,35 @@ export async function checkShadowban(username: string): Promise<ShadowbanStatus 
       const tests = data.tests || {};
       
       // Phân tích cấu trúc dữ liệu từ API:
-      // search: "_implied_good" hoặc "banned"
-      // typeahead: true (tốt) hoặc false (banned)
-      // ghost.ban: true hoặc false
-      // more_replies.ban: true hoặc false
+      // search: "_implied_good" hoặc "banned" hoặc null
+      // typeahead: true (tốt) hoặc false (banned) hoặc null
+      // ghost.ban: true hoặc false hoặc null
+      // more_replies.ban: true hoặc false hoặc null
       
       const status: ShadowbanStatus = {
         search_ban: tests.search === "banned",
         search_suggestion_ban: tests.typeahead === false,
         ghost_ban: tests.ghost?.ban === true,
         reply_deboosting: tests.more_replies?.ban === true,
-        is_banned: false
+        is_banned: false,
+        is_suspected: false
       };
 
       // Tổng hợp trạng thái ban
       status.is_banned = status.search_ban || status.search_suggestion_ban || status.ghost_ban || status.reply_deboosting;
       
+      // Kiểm tra trạng thái nghi vấn (khi có bất kỳ giá trị nào là null)
+      status.is_suspected = !status.is_banned && (
+        tests.search === null || 
+        tests.typeahead === null || 
+        tests.ghost?.ban === null || 
+        tests.more_replies?.ban === null
+      );
+      
       if (status.is_banned) {
         logger.warn(`Phát hiện tài khoản @${username} đang bị Shadowban!`);
+      } else if (status.is_suspected) {
+        logger.info(`Tài khoản @${username} có dấu hiệu nghi vấn (API trả về null).`);
       } else {
         logger.success(`Tài khoản @${username} hoàn toàn sạch (No Shadowban).`);
       }
