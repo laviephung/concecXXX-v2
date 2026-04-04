@@ -19,25 +19,38 @@ export async function checkShadowban(username: string): Promise<ShadowbanStatus 
   try {
     logger.info(`Đang kiểm tra Shadowban cho @${username}...`);
     
-    // Sử dụng API của yuzurisa.com (Dựa trên cấu trúc phổ biến của các trang check shadowban)
-    // Nếu API không khả dụng, chúng ta sẽ dùng axios để lấy HTML và parse đơn giản
-    const response = await axios.get(`https://shadowban.yuzurisa.com/api/check?screen_name=${username}`, {
+    // Sử dụng API chính xác từ yuzurisa.com mà người dùng cung cấp
+    const response = await axios.get(`https://shadowban-api.yuzurisa.com:444/${username}`, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json'
+        'accept': '*/*',
+        'accept-language': 'vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5',
+        'origin': 'https://shadowban.yuzurisa.com',
+        'referer': 'https://shadowban.yuzurisa.com/',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36'
       },
-      timeout: 15000
+      timeout: 20000
     });
 
     if (response.status === 200 && response.data) {
       const data = response.data;
+      const tests = data.tests || {};
+      
+      // Phân tích cấu trúc dữ liệu từ API:
+      // search: "_implied_good" hoặc "banned"
+      // typeahead: true (tốt) hoặc false (banned)
+      // ghost.ban: true hoặc false
+      // more_replies.ban: true hoặc false
+      
       const status: ShadowbanStatus = {
-        search_ban: data.search_ban || false,
-        search_suggestion_ban: data.search_suggestion_ban || false,
-        ghost_ban: data.ghost_ban || false,
-        reply_deboosting: data.reply_deboosting || false,
-        is_banned: data.search_ban || data.search_suggestion_ban || data.ghost_ban || data.reply_deboosting
+        search_ban: tests.search === "banned",
+        search_suggestion_ban: tests.typeahead === false,
+        ghost_ban: tests.ghost?.ban === true,
+        reply_deboosting: tests.more_replies?.ban === true,
+        is_banned: false
       };
+
+      // Tổng hợp trạng thái ban
+      status.is_banned = status.search_ban || status.search_suggestion_ban || status.ghost_ban || status.reply_deboosting;
       
       if (status.is_banned) {
         logger.warn(`Phát hiện tài khoản @${username} đang bị Shadowban!`);
@@ -51,8 +64,6 @@ export async function checkShadowban(username: string): Promise<ShadowbanStatus 
     return null;
   } catch (err: any) {
     logger.error(`Lỗi khi check Shadowban: ${err.message}`);
-    // Fallback: Nếu API lỗi, chúng ta giả định là không bị ban để bot tiếp tục chạy, 
-    // nhưng sẽ cảnh báo người dùng kiểm tra thủ công.
     return null;
   }
 }
