@@ -7,7 +7,7 @@ import { createLogger } from "../utils/logger";
 import { downloadOne, getVideoStats } from "../downloader/video-downloader";
 import { downloadAllChannels, cleanupPublishedVideos, getDiskUsage } from "../downloader/channel-downloader";
 import { downloadInstagramOne, downloadInstagramProfile } from "../downloader/instagram-downloader";
-import { triggerPublishNow } from "../scheduler";
+import { triggerPublishNow, checkBanNow } from "../scheduler";
 import db from "../db";
 
 const logger = createLogger("TelegramBot");
@@ -42,6 +42,7 @@ export function startTelegramBot(): TelegramBot {
       `/add <url> - Thêm 1 video lẻ\n\n` +
       `*📊 Quản lý:*\n` +
       `/status - Thống kê + dung lượng\n` +
+      `/checkban - Kiểm tra Shadowban 🛡️\n` +
       `/queue - Hàng đợi\n` +
       `/recent - Tweet gần đây\n` +
       `/cleanup - Xóa file đã đăng\n\n` +
@@ -72,6 +73,39 @@ export function startTelegramBot(): TelegramBot {
       `🔄 Auto-publish: ${isPublishing ? "✅ Đang chạy" : "⏸️ Tạm dừng"}\n` +
       `⏰ Chu kỳ đăng: mỗi *${config.publishIntervalMinutes} phút*`
     );
+  });
+
+  // ─── /checkban ───────────────────────────────────────────────────────────
+  bot.onText(/\/checkban/, async (msg) => {
+    if (!isAdmin(msg.from?.id)) return;
+    await reply(msg.chat.id, `🔍 Đang kiểm tra trạng thái Shadowban cho @0xFly_...`);
+    
+    try {
+      const status = await checkBanNow();
+      if (!status) {
+        await reply(msg.chat.id, `❌ Không thể kết nối tới API kiểm tra Shadowban.`);
+        return;
+      }
+
+      const getIcon = (val: boolean) => val ? "🔴 BỊ BAN" : "🟢 SẠCH";
+      
+      let report = `🛡️ *Kết quả kiểm tra Shadowban (@0xFly_):*\n\n` +
+        `• Search Ban: ${getIcon(status.search_ban)}\n` +
+        `• Search Suggestion Ban: ${getIcon(status.search_suggestion_ban)}\n` +
+        `• Ghost Ban: ${getIcon(status.ghost_ban)}\n` +
+        `• Reply Deboosting: ${getIcon(status.reply_deboosting)}\n\n`;
+
+      if (status.is_banned) {
+        report += `⚠️ *Trạng thái:* Đang bị Shadowban!\n` +
+          `🛡️ *Hệ thống:* Đã kích hoạt Safe Mode (Giảm tần suất, xóa hashtag).`;
+      } else {
+        report += `✅ *Trạng thái:* Tài khoản hoàn toàn sạch!`;
+      }
+
+      await reply(msg.chat.id, report);
+    } catch (err: any) {
+      await reply(msg.chat.id, `❌ Lỗi khi kiểm tra: ${err.message}`);
+    }
   });
 
   // ─── /addchannel ─────────────────────────────────────────────────────────

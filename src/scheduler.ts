@@ -1,7 +1,7 @@
 // src/scheduler.ts
 // Lịch đăng bài theo 2 khung giờ, mỗi video cách nhau 30-60 phút (Random Delay)
 // Đã cải tiến: Tích hợp Watcher cho Sync-to-VPS, Random Delay, Đăng bài văn bản xen kẽ, Kiểm tra Shadowban
-// FIX v2.5: Giới hạn tần suất đăng bài văn bản (text-only) tối thiểu 12 tiếng một lần
+// FIX v2.7: Xuất hàm checkBan để Telegram Bot có thể gọi thủ công
 
 import cron from "node-cron";
 import { config } from "./config";
@@ -93,6 +93,18 @@ async function publishNextInQueue() {
   }
 }
 
+// ─── Hàm kiểm tra Shadowban công khai ─────────────────────────────────────────
+
+export async function checkBanNow() {
+  const username = "0xFly_"; // Tên tài khoản của anh
+  const status = await checkShadowban(username);
+  if (status) {
+    isShadowbanned = status.is_banned;
+    return status;
+  }
+  return null;
+}
+
 // ─── Khởi động scheduler ──────────────────────────────────────────────────────
 
 export function startScheduler() {
@@ -101,39 +113,35 @@ export function startScheduler() {
   const slot1Videos = config.publishSlot1Videos;
   const slot2Videos = config.publishSlot2Videos;
 
-  // ─── Kiểm tra Shadowban (mỗi 6 giờ) ───────────────────────────────────────
-  const checkBan = async () => {
-    const username = "0xFly_"; // Tên tài khoản của anh
-    const status = await checkShadowban(username);
-    if (status) {
-      isShadowbanned = status.is_banned;
-      if (isShadowbanned) {
-        const banTypes = [];
-        if (status.search_ban) banTypes.push("Search Ban");
-        if (status.search_suggestion_ban) banTypes.push("Search Suggestion Ban");
-        if (status.ghost_ban) banTypes.push("Ghost Ban");
-        if (status.reply_deboosting) banTypes.push("Reply Deboosting");
-        
-        for (const adminId of config.adminUserIds) {
-          await tgBot.sendMessage(adminId, 
-            `🚨 *CẢNH BÁO SHADOWBAN!*\n\n` +
-            `Tài khoản @${username} đang bị: *${banTypes.join(", ")}*\n\n` +
-            `🛡️ *Bot đã tự động kích hoạt Safe Mode:*\n` +
-            `- Giảm số lượng video xuống 1 bài/slot.\n` +
-            `- Tăng tỷ lệ bài đăng văn bản lên 50%.\n` +
-            `- Tạm thời loại bỏ hashtag khỏi video.\n\n` +
-            `🔗 Kiểm tra tại: https://shadowban.yuzurisa.com/${username}`,
-            { parse_mode: "Markdown" }
-          );
-        }
+  // ─── Kiểm tra Shadowban định kỳ ───────────────────────────────────────────
+  const checkBanJob = async () => {
+    const status = await checkBanNow();
+    if (status && status.is_banned) {
+      const banTypes = [];
+      if (status.search_ban) banTypes.push("Search Ban");
+      if (status.search_suggestion_ban) banTypes.push("Search Suggestion Ban");
+      if (status.ghost_ban) banTypes.push("Ghost Ban");
+      if (status.reply_deboosting) banTypes.push("Reply Deboosting");
+      
+      for (const adminId of config.adminUserIds) {
+        await tgBot.sendMessage(adminId, 
+          `🚨 *CẢNH BÁO SHADOWBAN!*\n\n` +
+          `Tài khoản @0xFly_ đang bị: *${banTypes.join(", ")}*\n\n` +
+          `🛡️ *Bot đã tự động kích hoạt Safe Mode:*\n` +
+          `- Giảm số lượng video xuống 1 bài/slot.\n` +
+          `- Tăng tỷ lệ bài đăng văn bản lên 50%.\n` +
+          `- Tạm thời loại bỏ hashtag khỏi video.\n\n` +
+          `🔗 Kiểm tra tại: https://shadowban.yuzurisa.com/0xFly_`,
+          { parse_mode: "Markdown" }
+        );
       }
     }
   };
   
   // Chạy check ngay khi khởi động
-  checkBan();
+  checkBanJob();
   // Lên lịch check mỗi 6 giờ
-  cron.schedule("0 */6 * * *", checkBan);
+  cron.schedule("0 */6 * * *", checkBanJob);
 
   // ─── Quét video mới từ Sync-to-VPS (mỗi 1 phút) ───────────────────────────
   cron.schedule("*/1 * * * *", async () => {
@@ -202,7 +210,7 @@ export function startScheduler() {
   });
 
   logger.success(
-    `Scheduler v2.5 (Strict Text Post Limit):\n` +
+    `Scheduler v2.7 (Manual Check Support):\n` +
     `  🔍 Watcher Sync : mỗi 1 phút\n` +
     `  📝 Tạo caption  : mỗi 2 phút\n` +
     `  📤 Khung sáng   : ${slot1Hour}:00 → ${slot1Videos} video\n` +
