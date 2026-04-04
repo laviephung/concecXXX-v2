@@ -1,6 +1,6 @@
 // src/scheduler.ts
 // Lịch đăng bài theo 2 khung giờ, mỗi video cách nhau 30-60 phút (Random Delay)
-// Đã cải tiến: Tích hợp Watcher cho Sync-to-VPS, Random Delay, Đăng bài văn bản xen kẽ
+// Đã cải tiến: Tích hợp Watcher cho Sync-to-VPS, Random Delay, Đăng bài văn bản xen kẽ, Kiểm tra Shadowban
 
 import cron from "node-cron";
 import { config } from "./config";
@@ -11,13 +11,17 @@ import { downloadAllChannels, cleanupPublishedVideos } from "./downloader/channe
 import { getPublishingStatus } from "./bot/telegram-bot";
 import { scanNewVideos } from "./downloader/watcher";
 import { generateFunnyText } from "./processor/text-generator";
+import { checkShadowban, ShadowbanStatus } from "./utils/shadowban-checker";
+import TelegramBot from "node-telegram-bot-api";
 
 const logger = createLogger("Scheduler");
+const tgBot = new TelegramBot(config.telegramBotToken);
 
 // ─── Trạng thái publish queue ─────────────────────────────────────────────────
 
 let publishQueue: { videosLeft: number; slotName: string } | null = null;
 let publishTimer: NodeJS.Timeout | null = null;
+let isShadowbanned = false; // Trạng thái Shadowban hiện tại
 
 // ─── Đăng từng video trong queue theo interval ngẫu nhiên ──────────────────────
 
@@ -27,8 +31,15 @@ async function startPublishQueue(totalVideos: number, slotName: string) {
     return;
   }
 
-  logger.info(`Bắt đầu khung giờ ${slotName}: đăng ${totalVideos} video, cách nhau ~${config.publishIntervalMinutes} phút`);
-  publishQueue = { videosLeft: totalVideos, slotName };
+  // Nếu bị Shadowban, giảm số lượng video đăng xuống 1 bài/slot để "cứu" tài khoản
+  let finalTotalVideos = totalVideos;
+  if (isShadowbanned) {
+    finalTotalVideos = 1;
+    logger.warn(`⚠️ Đang bị Shadowban: Giảm số lượng video xuống còn ${finalTotalVideos} bài/slot.`);
+  }
+
+  logger.info(`Bắt đầu khung giờ ${slotName}: đăng ${finalTotalVideos} video, cách nhau ~${config.publishIntervalMinutes} phút`);
+  publishQueue = { videosLeft: finalTotalVideos, slotName };
 
   // Đăng video đầu tiên ngay lập tức
   await publishNextInQueue();
@@ -50,21 +61,20 @@ async function publishNextInQueue() {
   }
 
   try {
-    // 🎲 Cơ chế xen kẽ bài đăng văn bản (Xác suất 25%)
-    const shouldPostText = Math.random() < 0.25;
+    // 🎲 Cơ chế xen kẽ bài đăng văn bản (Xác suất 25%, nếu bị ban tăng lên 50%)
+    const textProbability = isShadowbanned ? 0.5 : 0.25;
+    const shouldPostText = Math.random() < textProbability;
     
     if (shouldPostText) {
-      logger.info("🎲 Quyết định đăng một bài văn bản ngẫu nhiên để tăng tương tác...");
+      logger.info(`🎲 Quyết định đăng một bài văn bản ngẫu nhiên (Xác suất: ${textProbability * 100}%)...`);
       const funnyText = await generateFunnyText();
       if (funnyText) {
         await publishTextOnly(funnyText);
-        // Sau khi đăng bài text, chúng ta vẫn giữ nguyên số lượng videoLeft 
-        // để đảm bảo đủ số lượng video anh muốn trong 1 slot.
       }
     }
 
     logger.info(`Đang đăng video (còn lại: ${publishQueue.videosLeft})`);
-    const ok = await publishOne();
+    const ok = await publishOne(isShadowbanned); // Truyền trạng thái ban để xử lý hashtag
     if (!ok) {
       logger.warn("Không có video để đăng, kết thúc khung giờ sớm");
       publishQueue = null;
@@ -100,6 +110,40 @@ export function startScheduler() {
   const slot2Hour = config.publishSlot2Hour;
   const slot1Videos = config.publishSlot1Videos;
   const slot2Videos = config.publishSlot2Videos;
+
+  // ─── Kiểm tra Shadowban (mỗi 6 giờ) ───────────────────────────────────────
+  const checkBan = async () => {
+    const username = "0xFly_"; // Tên tài khoản của anh
+    const status = await checkShadowban(username);
+    if (status) {
+      isShadowbanned = status.is_banned;
+      if (isShadowbanned) {
+        const banTypes = [];
+        if (status.search_ban) banTypes.push("Search Ban");
+        if (status.search_suggestion_ban) banTypes.push("Search Suggestion Ban");
+        if (status.ghost_ban) banTypes.push("Ghost Ban");
+        if (status.reply_deboosting) banTypes.push("Reply Deboosting");
+        
+        for (const adminId of config.adminUserIds) {
+          await tgBot.sendMessage(adminId, 
+            `🚨 *CẢNH BÁO SHADOWBAN!*\n\n` +
+            `Tài khoản @${username} đang bị: *${banTypes.join(", ")}*\n\n` +
+            `🛡️ *Bot đã tự động kích hoạt Safe Mode:*\n` +
+            `- Giảm số lượng video xuống 1 bài/slot.\n` +
+            `- Tăng tỷ lệ bài đăng văn bản lên 50%.\n` +
+            `- Tạm thời loại bỏ hashtag khỏi video.\n\n` +
+            `🔗 Kiểm tra tại: https://shadowban.yuzurisa.com/${username}`,
+            { parse_mode: "Markdown" }
+          );
+        }
+      }
+    }
+  };
+  
+  // Chạy check ngay khi khởi động
+  checkBan();
+  // Lên lịch check mỗi 6 giờ
+  cron.schedule("0 */6 * * *", checkBan);
 
   // ─── Quét video mới từ Sync-to-VPS (mỗi 1 phút) ───────────────────────────
   cron.schedule("*/1 * * * *", async () => {
@@ -140,13 +184,14 @@ export function startScheduler() {
   });
 
   logger.success(
-    `Scheduler v2.1 khởi động:\n` +
+    `Scheduler v2.2 khởi động:\n` +
     `  🔍 Watcher Sync : mỗi 1 phút\n` +
     `  📝 Tạo caption  : mỗi 2 phút\n` +
     `  📤 Khung sáng   : ${slot1Hour}:00 → ${slot1Videos} video\n` +
     `  📤 Khung tối    : ${slot2Hour}:00 → ${slot2Videos} video\n` +
     `  ⏱️  Cách nhau    : ~${config.publishIntervalMinutes} phút (Random Delay)\n` +
     `  🎲 Xen kẽ Text  : Có (Xác suất 25%)\n` +
+    `  🛡️  Shadowban Check: Mỗi 6 giờ\n` +
     `  🗑️  Xóa file cũ  : mỗi 1 giờ`
   );
 }

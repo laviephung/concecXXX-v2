@@ -1,6 +1,6 @@
 // src/publisher/twitter-publisher.ts
 // Upload video + đăng tweet lên X + thông báo về Telegram
-// Đã cải tiến: Hỗ trợ đăng bài văn bản (text-only) ngẫu nhiên
+// Đã cải tiến: Hỗ trợ đăng bài văn bản (text-only) ngẫu nhiên, Safe Mode cho Shadowban
 
 import { TwitterApi } from "twitter-api-v2";
 import TelegramBot from "node-telegram-bot-api";
@@ -74,7 +74,7 @@ export async function publishTextOnly(text: string): Promise<boolean> {
 
 // ─── Đăng 1 tweet kèm video ──────────────────────────────────────────────────
 
-export async function publishOne(): Promise<boolean> {
+export async function publishOne(isShadowbanned: boolean = false): Promise<boolean> {
   const video = await db.videoLibrary.findFirst({
     where: { status: "ready" },
     orderBy: { createdAt: "asc" },
@@ -112,7 +112,14 @@ export async function publishOne(): Promise<boolean> {
     const mediaId = await uploadVideo(video.localPath);
 
     // Đăng tweet
-    const caption = video.caption || "Check this out 🔥 #viral #trending";
+    let caption = video.caption || "Check this out 🔥 #viral #trending";
+    
+    // 🛡️ Safe Mode: Nếu bị Shadowban, loại bỏ hashtag để tránh bị quét spam
+    if (isShadowbanned) {
+      logger.warn("🛡️ Safe Mode: Tự động loại bỏ hashtag khỏi caption để cứu tài khoản.");
+      caption = caption.replace(/#[a-zA-Z0-9_]+/g, "").trim();
+    }
+
     const tweet = await rwClient.v2.tweet({
       text: caption,
       media: { media_ids: [mediaId] },
@@ -138,7 +145,7 @@ export async function publishOne(): Promise<boolean> {
 
     // ✅ Thông báo thành công
     await notify(
-      `✅ *Đã đăng tweet thành công!*\n\n` +
+      `✅ *Đã đăng tweet thành công!*${isShadowbanned ? " (🛡️ Safe Mode)" : ""}\n\n` +
       `📹 ${(video.title || "Untitled").substring(0, 60)}\n` +
       `💬 ${caption.substring(0, 100)}\n` +
       `🔗 https://x.com/i/status/${tweetId}`
