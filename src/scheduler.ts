@@ -1,7 +1,7 @@
 // src/scheduler.ts
 // Lịch đăng bài theo 2 khung giờ, mỗi video cách nhau 30-60 phút (Random Delay)
 // Đã cải tiến: Tích hợp Watcher cho Sync-to-VPS, Random Delay, Đăng bài văn bản xen kẽ, Kiểm tra Shadowban
-// FIX v2.4: Tách biệt bài đăng văn bản (text-only) ra khỏi khung giờ đăng video, đăng ngẫu nhiên rải rác trong ngày
+// FIX v2.5: Giới hạn tần suất đăng bài văn bản (text-only) tối thiểu 12 tiếng một lần
 
 import cron from "node-cron";
 import { config } from "./config";
@@ -23,6 +23,7 @@ const tgBot = new TelegramBot(config.telegramBotToken);
 let publishQueue: { videosLeft: number; slotName: string } | null = null;
 let publishTimer: NodeJS.Timeout | null = null;
 let isShadowbanned = false; // Trạng thái Shadowban hiện tại
+let lastTextPostTime: number = 0; // Lưu thời điểm đăng bài văn bản gần nhất
 
 // ─── Đăng từng video trong queue theo interval ngẫu nhiên ──────────────────────
 
@@ -62,7 +63,6 @@ async function publishNextInQueue() {
   }
 
   try {
-    // 🎲 FIX v2.4: Đã loại bỏ việc đăng bài văn bản xen kẽ ở đây để tách ra khung giờ riêng
     logger.info(`Đang đăng video (còn lại: ${publishQueue.videosLeft})`);
     const ok = await publishOne(isShadowbanned); // Truyền trạng thái ban để xử lý hashtag
     if (!ok) {
@@ -159,21 +159,30 @@ export function startScheduler() {
     await startPublishQueue(slot2Videos, `Tối (${slot2Hour}:00)`);
   });
 
-  // 🎲 FIX v2.4: Đăng bài văn bản ngẫu nhiên rải rác trong ngày (mỗi 3-6 tiếng)
-  // Chạy mỗi giờ để kiểm tra xác suất
+  // 🎲 FIX v2.5: Đăng bài văn bản ngẫu nhiên rải rác trong ngày (Tối thiểu 12 tiếng/lần)
   cron.schedule("0 * * * *", async () => {
     if (!getPublishingStatus()) return;
     
     // Nếu đang trong khung giờ đăng video, bỏ qua để tránh dồn dập
     if (publishQueue) return;
 
-    // Xác suất 25% mỗi giờ (trung bình 4 tiếng đăng 1 bài)
+    // Kiểm tra xem đã đủ 12 tiếng kể từ bài đăng văn bản gần nhất chưa
+    const now = Date.now();
+    const twelveHoursMs = 12 * 60 * 60 * 1000;
+    if (now - lastTextPostTime < twelveHoursMs) {
+      return; // Chưa đủ 12 tiếng, bỏ qua
+    }
+
+    // Xác suất 25% mỗi giờ sau khi đã qua 12 tiếng
     const shouldPostText = Math.random() < 0.25;
     if (shouldPostText) {
-      logger.info(`🎲 Quyết định đăng một bài văn bản ngẫu nhiên ngoài khung giờ video...`);
+      logger.info(`🎲 Quyết định đăng một bài văn bản ngẫu nhiên (Đã qua 12 tiếng)...`);
       const funnyText = await generateFunnyText();
       if (funnyText) {
-        await publishTextOnly(funnyText);
+        const ok = await publishTextOnly(funnyText);
+        if (ok) {
+          lastTextPostTime = Date.now(); // Cập nhật thời điểm đăng bài thành công
+        }
       }
     }
   });
@@ -193,13 +202,13 @@ export function startScheduler() {
   });
 
   logger.success(
-    `Scheduler v2.4 (Separate Text Posts):\n` +
+    `Scheduler v2.5 (Strict Text Post Limit):\n` +
     `  🔍 Watcher Sync : mỗi 1 phút\n` +
     `  📝 Tạo caption  : mỗi 2 phút\n` +
     `  📤 Khung sáng   : ${slot1Hour}:00 → ${slot1Videos} video\n` +
     `  📤 Khung tối    : ${slot2Hour}:00 → ${slot2Videos} video\n` +
     `  ⏱️  Cách nhau    : ~${config.publishIntervalMinutes} phút (Random Delay)\n` +
-    `  🎲 Bài đăng Text: Ngẫu nhiên rải rác (Xác suất 25%/giờ)\n` +
+    `  🎲 Bài đăng Text: Tối thiểu 12 tiếng/lần (Xác suất 25%/giờ)\n` +
     `  🛡️  Shadowban Check: Mỗi 6 giờ\n` +
     `  🗑️  Xóa file cũ  : mỗi 1 giờ`
   );
