@@ -1,15 +1,16 @@
 // src/scheduler.ts
 // Lịch đăng bài theo 2 khung giờ, mỗi video cách nhau 30-60 phút (Random Delay)
-// Đã cải tiến: Tích hợp Watcher cho Sync-to-VPS, Random Delay để tránh spam
+// Đã cải tiến: Tích hợp Watcher cho Sync-to-VPS, Random Delay, Đăng bài văn bản xen kẽ
 
 import cron from "node-cron";
 import { config } from "./config";
 import { createLogger } from "./utils/logger";
 import { processPendingCaptions } from "./processor/caption-generator";
-import { publishOne } from "./publisher/twitter-publisher";
+import { publishOne, publishTextOnly } from "./publisher/twitter-publisher";
 import { downloadAllChannels, cleanupPublishedVideos } from "./downloader/channel-downloader";
 import { getPublishingStatus } from "./bot/telegram-bot";
 import { scanNewVideos } from "./downloader/watcher";
+import { generateFunnyText } from "./processor/text-generator";
 
 const logger = createLogger("Scheduler");
 
@@ -49,6 +50,19 @@ async function publishNextInQueue() {
   }
 
   try {
+    // 🎲 Cơ chế xen kẽ bài đăng văn bản (Xác suất 25%)
+    const shouldPostText = Math.random() < 0.25;
+    
+    if (shouldPostText) {
+      logger.info("🎲 Quyết định đăng một bài văn bản ngẫu nhiên để tăng tương tác...");
+      const funnyText = await generateFunnyText();
+      if (funnyText) {
+        await publishTextOnly(funnyText);
+        // Sau khi đăng bài text, chúng ta vẫn giữ nguyên số lượng videoLeft 
+        // để đảm bảo đủ số lượng video anh muốn trong 1 slot.
+      }
+    }
+
     logger.info(`Đang đăng video (còn lại: ${publishQueue.videosLeft})`);
     const ok = await publishOne();
     if (!ok) {
@@ -112,7 +126,6 @@ export function startScheduler() {
   });
 
   // ─── Tự động tải batch mới từ kênh (mỗi 6 giờ) ──────────────────────────
-  // Vẫn giữ lại để hỗ trợ Douyin/Instagram nếu VPS không bị chặn
   cron.schedule("0 */6 * * *", async () => {
     try {
       logger.info("Auto crawl kênh theo lịch...");
@@ -127,12 +140,13 @@ export function startScheduler() {
   });
 
   logger.success(
-    `Scheduler v2 khởi động:\n` +
+    `Scheduler v2.1 khởi động:\n` +
     `  🔍 Watcher Sync : mỗi 1 phút\n` +
     `  📝 Tạo caption  : mỗi 2 phút\n` +
     `  📤 Khung sáng   : ${slot1Hour}:00 → ${slot1Videos} video\n` +
     `  📤 Khung tối    : ${slot2Hour}:00 → ${slot2Videos} video\n` +
     `  ⏱️  Cách nhau    : ~${config.publishIntervalMinutes} phút (Random Delay)\n` +
+    `  🎲 Xen kẽ Text  : Có (Xác suất 25%)\n` +
     `  🗑️  Xóa file cũ  : mỗi 1 giờ`
   );
 }

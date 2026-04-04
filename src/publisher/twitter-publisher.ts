@@ -1,5 +1,6 @@
 // src/publisher/twitter-publisher.ts
 // Upload video + đăng tweet lên X + thông báo về Telegram
+// Đã cải tiến: Hỗ trợ đăng bài văn bản (text-only) ngẫu nhiên
 
 import { TwitterApi } from "twitter-api-v2";
 import TelegramBot from "node-telegram-bot-api";
@@ -46,6 +47,29 @@ async function uploadVideo(filePath: string): Promise<string> {
 
   logger.success(`Upload xong, media_id: ${initResponse}`);
   return initResponse;
+}
+
+// ─── Đăng 1 tweet chỉ có văn bản (Text-only) ──────────────────────────────────
+
+export async function publishTextOnly(text: string): Promise<boolean> {
+  try {
+    logger.info(`Đang đăng tweet văn bản: ${text.substring(0, 50)}...`);
+    const tweet = await rwClient.v2.tweet(text);
+    const tweetId = tweet.data.id;
+
+    logger.success(`Đã đăng tweet văn bản: https://x.com/i/status/${tweetId}`);
+
+    await notify(
+      `📝 *Đã đăng bài văn bản ngẫu nhiên!*\n\n` +
+      `💬 ${text}\n` +
+      `🔗 https://x.com/i/status/${tweetId}`
+    );
+
+    return true;
+  } catch (err: any) {
+    logger.error(`Lỗi đăng tweet văn bản: ${err.message}`);
+    return false;
+  }
 }
 
 // ─── Đăng 1 tweet kèm video ──────────────────────────────────────────────────
