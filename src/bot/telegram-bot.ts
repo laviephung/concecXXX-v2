@@ -18,6 +18,26 @@ export function startTelegramBot(): TelegramBot {
   bot = new TelegramBot(config.telegramBotToken, { polling: true });
   logger.success("Telegram bot đã khởi động");
 
+  // Tự động đăng ký danh sách lệnh (Menu) với Telegram
+  bot.setMyCommands([
+    { command: "start", description: "Hướng dẫn sử dụng" },
+    { command: "status", description: "Thống kê kho video + dung lượng" },
+    { command: "checkban", description: "Kiểm tra Shadowban @0xFly_ 🛡️" },
+    { command: "queue", description: "Xem hàng đợi chờ đăng" },
+    { command: "recent", description: "Xem các tweet vừa đăng" },
+    { command: "postnow", description: "Đăng 1 video ngay lập tức" },
+    { command: "crawlnow", description: "Tải batch video ngay bây giờ" },
+    { command: "channels", description: "Danh sách kênh đang theo dõi" },
+    { command: "cleanup", description: "Xóa file video đã đăng" },
+    { command: "pause", description: "Tạm dừng auto-publish" },
+    { command: "resume", description: "Bật lại auto-publish" },
+    { command: "retry", description: "Thử lại các video bị lỗi" }
+  ]).then(() => {
+    logger.success("Đã cập nhật danh sách menu lệnh lên Telegram");
+  }).catch(err => {
+    logger.error(`Lỗi khi cập nhật menu lệnh: ${err.message}`);
+  });
+
   const isAdmin = (userId?: number) =>
     !!userId && config.adminUserIds.includes(userId);
 
@@ -33,7 +53,7 @@ export function startTelegramBot(): TelegramBot {
   bot.onText(/\/start|\/help/, async (msg) => {
     if (!isAdmin(msg.from?.id)) return;
     await reply(msg.chat.id,
-      `🤖 *Content Bot*\n\n` +
+      `🤖 *Content Bot v2.8*\n\n` +
       `*📥 Tải video:*\n` +
       `/addchannel <url> - Thêm kênh\n` +
       `/removechannel <url> - Xóa kênh\n` +
@@ -47,6 +67,7 @@ export function startTelegramBot(): TelegramBot {
       `/recent - Tweet gần đây\n` +
       `/cleanup - Xóa file đã đăng\n\n` +
       `*⚙️ Điều khiển:*\n` +
+      `/postnow - Đăng ngay 1 bài\n` +
       `/pause - Tạm dừng đăng\n` +
       `/resume - Bật lại đăng\n` +
       `/retry - Thử lại video lỗi`
