@@ -1,6 +1,6 @@
 // src/processor/caption-generator.ts
-// Dùng OpenAI để tự động viết caption tiếng Anh từ tiêu đề video
-// Đã cải tiến: Chuyên sâu về Family Guy, phong cách viral trên X (Twitter)
+// Dùng OpenAI để viết caption cho video dựa trên tiêu đề/metadata
+// Đã cải tiến: Giữ nguyên ý chính tiêu đề gốc + "nêm nếm" phong cách Family Guy & X (Twitter)
 
 import OpenAI from "openai";
 import { config } from "../config";
@@ -13,56 +13,41 @@ const ai = new OpenAI({
   apiKey: config.openaiApiKey,
 });
 
-// ─── Các phong cách Caption cho X chuyên về Family Guy ─────────────────────────
-
-const CAPTION_STYLES = [
-  {
-    name: "POV/Relatable",
-    prompt: "Write a caption starting with 'POV:' or 'Me when...'. Make it relatable to daily life using the Family Guy scene. Max 150 chars."
-  },
-  {
-    name: "Menace/Unhinged",
-    prompt: "Focus on how 'unhinged' or a 'menace' Peter Griffin or the characters are. Use slang like 'cooked', 'no way', 'bruh'. Max 150 chars."
-  },
-  {
-    name: "Out of Context",
-    prompt: "Write a caption that highlights how 'out of context' or 'wild' this Family Guy moment is. Max 150 chars."
-  },
-  {
-    name: "Engagement/Question",
-    prompt: "Ask a controversial or funny question about Family Guy characters (Peter, Stewie, Brian) to get people to reply. Max 150 chars."
-  },
-  {
-    name: "Short/Punchy",
-    prompt: "Write a very short, punchy caption (under 60 chars) that hits hard. One sentence only."
-  }
-];
-
 // ─── Viết caption cho 1 video ─────────────────────────────────────────────────
 
 async function generateCaption(title: string): Promise<string | null> {
   try {
-    const style = CAPTION_STYLES[Math.floor(Math.random() * CAPTION_STYLES.length)];
-    
+    logger.info(`Đang tạo caption "mặn" cho: ${title}`);
+
     const response = await ai.chat.completions.create({
       model: "gpt-4o-mini",
-      max_tokens: 200,
+      max_tokens: 150,
       messages: [
         {
           role: "system",
-          content: `You are a viral content creator on X (Twitter) specializing in Family Guy clips.
+          content: `You are a viral content creator on X (Twitter) who is a huge fan of Family Guy.
+Your goal is to take the original video title and "spice it up" with Family Guy humor and X slang.
+
 Rules:
-- ${style.prompt}
-- Casual, native English tone.
-- Characters: Peter (idiot), Stewie (evil baby), Brian (dog), Quagmire, Joe.
-- No Chinese characters.
-- Do NOT use hashtags (makes it look like a bot).
-- Use 1-2 emojis max (💀, 😭, 😂, 🔥).
-- Make it sound like a real person's thought, not an ad.`,
+- KEEP the core meaning of the original title (e.g., if it's about Peter fighting a chicken, mention the fight).
+- SPICE it up with "unhinged" or "vô tri" humor.
+- Use X slang: "menace", "cooked", "unhinged", "literally me", "bruh", "💀", "😭", "😂".
+- NO clickbait phrases like "You won't believe", "Wait for it", "Watch until the end".
+- NO hashtags (makes it look like a bot).
+- NO Chinese characters.
+- Short and punchy (Max 120 characters).
+- Make it sound like a real person's thought, not a marketing ad.
+
+Example:
+Input: "Peter Griffin vs Giant Chicken"
+Output: "This beef will never end 💀 Peter is a menace for this 😂"
+
+Input: "Stewie roasts Brian"
+Output: "Stewie chose violence today 😭 Brian is absolutely cooked bruh 💀"`,
         },
         {
           role: "user",
-          content: `Write a viral X caption for this Family Guy clip: "${title}"`,
+          content: `Original Title: "${title}"\nWrite a viral X caption based on this.`,
         },
       ],
     });
@@ -72,7 +57,7 @@ Rules:
 
     return caption.replace(/^"|"$/g, '');
   } catch (err: any) {
-    logger.error(`OpenAI error: ${err.message}`);
+    logger.error(`OpenAI error (Caption): ${err.message}`);
     return null;
   }
 }
@@ -87,7 +72,7 @@ export async function processPendingCaptions(): Promise<void> {
 
   if (videos.length === 0) return;
 
-  logger.info(`Đang tạo caption chuyên sâu Family Guy cho ${videos.length} video...`);
+  logger.info(`Đang tạo caption "nêm nếm" cho ${videos.length} video...`);
 
   for (const video of videos) {
     const caption = await generateCaption(video.title || "Family Guy Funny Moment");
@@ -99,14 +84,8 @@ export async function processPendingCaptions(): Promise<void> {
       });
       logger.success(`Caption OK: ${caption}`);
     } else {
-      const fallbacks = [
-        "Peter Griffin is actually a menace 💀",
-        "Family Guy out of context is wild 😭",
-        "How is this show still allowed? 😂",
-        "POV: You're watching Family Guy at 3 AM 💀"
-      ];
-      const fallback = fallbacks[Math.floor(Math.random() * fallbacks.length)];
-      
+      // Fallback đơn giản nếu AI lỗi
+      const fallback = `${video.title || "Family Guy"} is wild 💀😭`;
       await db.videoLibrary.update({
         where: { id: video.id },
         data: { caption: fallback, status: "ready" },
