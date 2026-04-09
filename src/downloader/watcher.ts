@@ -64,8 +64,10 @@ export async function scanNewVideos() {
       
       const finalPath = ok ? maskedPath : filePath;
       if (ok) {
-        // Xó      // Xóa file gốc để tiết kiệm dung lượng sau khi đã có bản masked
-      try { await fsp.unlink(filePath); } catch (e: any) { logger.error(`Lỗi xóa file gốc ${filePath}: ${e.message}`); }
+        // Xóa file gốc để tiết kiệm dung lượng sau khi đã có bản masked
+        try { await fsp.unlink(filePath); } catch (e: any) { logger.error(`Lỗi xóa file gốc ${filePath}: ${e.message}`); }
+      }
+
       // Xóa file .info.json sau khi đã đọc xong
       try {
         if (fs.existsSync(infoJsonPath)) { // Dùng fs.existsSync để kiểm tra đồng bộ
@@ -73,8 +75,9 @@ export async function scanNewVideos() {
           logger.info(`Đã xóa file metadata ${infoJsonPath}.`);
         }
       } catch (e: any) { /* File không tồn tại hoặc lỗi khác, bỏ qua */ }
+
       // Lấy thông tin cơ bản từ file cuối cùng
-      const stats = await fsp.stat(finalPath);;
+      const stats = await fsp.stat(finalPath);
       
       // Thêm vào DB với trạng thái chờ caption
       await db.videoLibrary.create({
@@ -90,6 +93,6 @@ export async function scanNewVideos() {
       });
       
       logger.success(`Đã đăng ký video ${videoId} (Masked: ${ok}) với tiêu đề "${videoTitle}" vào hàng đợi xử lý.`);
-    }
-  }
-}
+    } // end if(!existing)
+  } // end for
+} // end scanNewVideos
