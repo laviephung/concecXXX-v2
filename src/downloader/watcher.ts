@@ -3,7 +3,8 @@
 // Đã cải tiến: Tự động che logo (Video Masking) và chèn overlay thương hiệu @0xFly_
 // Cập nhật v3.2: Đọc file .info.json để lấy tiêu đề gốc của video
 
-import * as fs from "fs/promises"; // Sử dụng fs/promises cho async/await
+import * as fs from "fs"; // Sử dụng fs cho các hàm đồng bộ như existsSync
+import * as fsp from "fs/promises"; // Sử dụng fs/promises cho async/await
 import * as path from "path";
 import { config } from "../config";
 import { createLogger } from "../utils/logger";
@@ -14,11 +15,11 @@ const logger = createLogger("Watcher");
 
 export async function scanNewVideos() {
   if (!fs.existsSync(config.videoDir)) {
-    await fs.mkdir(config.videoDir, { recursive: true });
+    await fsp.mkdir(config.videoDir, { recursive: true });
     return;
   }
 
-  const files = await fs.readdir(config.videoDir);
+  const files = await fsp.readdir(config.videoDir);
   // Chỉ lấy các file .mp4 gốc, bỏ qua các file đã được xử lý (_masked.mp4) và các file .info.json
   const videoFiles = files.filter(f => f.endsWith(".mp4") && !f.includes("_masked.mp4") && !f.includes("_c.mp4"));
 
@@ -47,7 +48,7 @@ export async function scanNewVideos() {
       let videoTitle = videoId; // Mặc định dùng videoId làm title
       // Đọc file .info.json nếu tồn tại
       try {
-        const infoJsonContent = await fs.readFile(infoJsonPath, "utf-8");
+        const infoJsonContent = await fsp.readFile(infoJsonPath, "utf-8");
         const videoInfo = JSON.parse(infoJsonContent);
         if (videoInfo.title) {
           videoTitle = videoInfo.title; // Cập nhật title nếu có trong info.json
@@ -63,20 +64,17 @@ export async function scanNewVideos() {
       
       const finalPath = ok ? maskedPath : filePath;
       if (ok) {
-        // Xóa file gốc để tiết kiệm dung lượng sau khi đã có bản masked
-        try { await fs.unlink(filePath); } catch (e) { logger.error(`Lỗi xóa file gốc ${filePath}: ${e.message}`); }
-      }
-
+        // Xó      // Xóa file gốc để tiết kiệm dung lượng sau khi đã có bản masked
+      try { await fsp.unlink(filePath); } catch (e: any) { logger.error(`Lỗi xóa file gốc ${filePath}: ${e.message}`); }
       // Xóa file .info.json sau khi đã đọc xong
       try {
-        if (await fs.stat(infoJsonPath)) {
-          await fs.unlink(infoJsonPath);
+        if (fs.existsSync(infoJsonPath)) { // Dùng fs.existsSync để kiểm tra đồng bộ
+          await fsp.unlink(infoJsonPath);
           logger.info(`Đã xóa file metadata ${infoJsonPath}.`);
         }
-      } catch (e) { /* File không tồn tại hoặc lỗi khác, bỏ qua */ }
-
+      } catch (e: any) { /* File không tồn tại hoặc lỗi khác, bỏ qua */ }
       // Lấy thông tin cơ bản từ file cuối cùng
-      const stats = await fs.stat(finalPath);
+      const stats = await fsp.stat(finalPath);;
       
       // Thêm vào DB với trạng thái chờ caption
       await db.videoLibrary.create({
