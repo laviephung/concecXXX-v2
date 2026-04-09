@@ -7,6 +7,7 @@ import { startScheduler, triggerPublishNow } from "./scheduler";
 import { createLogger } from "./utils/logger";
 import TelegramBot from "node-telegram-bot-api";
 import { config } from "./config";
+import { checkFontInstalled } from "./utils/video-processor";
 
 const logger = createLogger("Main");
 
@@ -51,6 +52,7 @@ async function main() {
 
   // Set menu lệnh hiển thị trong Telegram
   await setCommandMenu();
+  await checkFontInstalled();
 
   // Khởi động Telegram bot
   startTelegramBot();
