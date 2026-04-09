@@ -7,7 +7,7 @@ import { createLogger } from "../utils/logger";
 import { downloadOne, getVideoStats } from "../downloader/video-downloader";
 import { downloadAllChannels, cleanupPublishedVideos, getDiskUsage } from "../downloader/channel-downloader";
 import { downloadInstagramOne, downloadInstagramProfile } from "../downloader/instagram-downloader";
-import { triggerPublishNow, checkBanNow } from "../scheduler";
+import { triggerPublishNow, checkBanNow, downloadAllChannels } from "../scheduler";
 import db from "../db";
 
 const logger = createLogger("TelegramBot");
@@ -58,7 +58,7 @@ export function startTelegramBot(): TelegramBot {
       `/addchannel <url> - Thêm kênh\n` +
       `/removechannel <url> - Xóa kênh\n` +
       `/channels - Danh sách kênh\n` +
-      `/crawlnow - Tải batch ngay\n` +
+      `/crawlnow - Tải batch ngay (10 video/kênh)\n` +
       `/add <url> - Thêm 1 video lẻ\n\n` +
       `*📊 Quản lý:*\n` +
       `/status - Thống kê + dung lượng\n` +
@@ -177,13 +177,13 @@ export function startTelegramBot(): TelegramBot {
     if (!isAdmin(msg.from?.id)) return;
     await reply(msg.chat.id, `⏳ Đang tải batch 10 video từ mỗi kênh...\n_Có thể mất vài phút_`);
     try {
-      await downloadAllChannels(10);
+      await downloadAllChannels(10); // Gọi hàm downloadAllChannels đã export từ scheduler
       const stats = await getVideoStats();
       await reply(msg.chat.id,
         `✅ Tải xong!\n📦 Chờ đăng: *${stats.ready + stats.pending}* video\n💾 Dung lượng: ${getDiskUsage()}`
       );
     } catch (err: any) {
-      await reply(msg.chat.id, `❌ Lỗi: ${err.message}`);
+      await reply(msg.chat.id, `❌ Lỗi khi crawl: ${err.message}`);
     }
   });
 

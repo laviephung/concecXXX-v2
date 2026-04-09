@@ -9,6 +9,7 @@ import { createLogger } from "./utils/logger";
 import { processPendingCaptions } from "./processor/caption-generator";
 import { publishOne, publishTextOnly } from "./publisher/twitter-publisher";
 import { downloadAllChannels, cleanupPublishedVideos } from "./downloader/channel-downloader";
+export { downloadAllChannels }; // Export hàm này để Telegram bot có thể gọi
 import { getPublishingStatus } from "./bot/telegram-bot";
 import { scanNewVideos } from "./downloader/watcher";
 import { generateFunnyText } from "./processor/text-generator";
@@ -207,12 +208,13 @@ export function startScheduler() {
   });
 
   // ─── Tự động tải batch mới từ kênh (mỗi 6 giờ) ──────────────────────────
-  cron.schedule("0 */6 * * *", async () => {
-    try {
-      logger.info("Auto crawl kênh theo lịch...");
-      await downloadAllChannels(10);
-    } catch (err: any) { logger.error(`Crawl job lỗi: ${err.message}`); }
-  });
+  // Đã vô hiệu hóa để chuyển sang chế độ thủ công qua Telegram /crawlnow
+  // cron.schedule("0 */6 * * *", async () => {
+  //   try {
+  //     logger.info("Auto crawl kênh theo lịch...");
+  //     await downloadAllChannels(10);
+  //   } catch (err: any) { logger.error(`Crawl job lỗi: ${err.message}`); }
+  // });
 
   // ─── Tự động xóa file video đã đăng (mỗi 1 giờ) ─────────────────────────
   cron.schedule("0 * * * *", async () => {
@@ -229,6 +231,7 @@ export function startScheduler() {
     `  ⏱️  Cách nhau    : ~${config.publishIntervalMinutes} phút (Random Delay)\n` +
     `  🎲 Bài đăng Text: Tối thiểu 12 tiếng/lần (Xác suất 25%/giờ)\n` +
     `  🛡️  Shadowban Check: Mỗi 6 giờ\n` +
+    `  📥 Crawl Kênh   : Thủ công qua /crawlnow\n` +
     `  🗑️  Xóa file cũ  : mỗi 1 giờ`
   );
 }
