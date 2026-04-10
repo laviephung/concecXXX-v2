@@ -1,10 +1,6 @@
 // src/utils/video-processor.ts
 // Xử lý video: Che logo cũ, chèn overlay thương hiệu @0xFly_, chống copyright
-<<<<<<< HEAD
-// v3.9: Fix lỗi video output bị hỏng (corrupted) do FFmpeg filtergraph
-=======
-// v4.0: Port từ Windows local đã test OK → Ubuntu VPS
->>>>>>> d4d903cb8c2e42e7acdb7bb6aa3bcc5e721c95e2
+// v3.9.2: Fix lỗi cú pháp do merge conflict
 
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -46,7 +42,7 @@ function escapeFontPath(p: string): string {
 function escText(t: string): string {
   return t
     .replace(/\\/g, "\\\\")
-    .replace(/'/g, "\\'")
+    .replace(/\'/g, "\\\'")
     .replace(/:/g, "\\:");
 }
 
@@ -100,51 +96,18 @@ export async function maskVideo(
     const rawFont = getAvailableFont();
     const font    = escapeFontPath(rawFont);
 
-<<<<<<< HEAD
-    // Tính toán kích thước
-    const maskH = Math.floor(h * 0.15);           // Chiều cao dải đen (15%)
-    const topFontSize = Math.floor(h * 0.038);    // Font size text trên
-    const bannerFontSize = Math.floor(h * 0.032); // Font size text dưới (banner)
-    const brandFontSize = Math.floor(h * 0.045);  // Font size @0xFly_ (to hơn, dễ thấy)
-=======
     const maskH = Math.floor(h * 0.15);
->>>>>>> d4d903cb8c2e42e7acdb7bb6aa3bcc5e721c95e2
 
     // Random hue shift -5 đến +5
     const hueShift = (Math.random() * 10 - 5).toFixed(1);
     const speed    = 1.03;
 
-<<<<<<< HEAD
-    // ─── Escape text cho ffmpeg drawtext ─────────────────────────────────────
-    // ffmpeg drawtext dùng ":" và "'" làm ký tự đặc biệt — phải escape
-    // '@' và '_' thì KHÔNG cần escape nhưng cần bọc trong dấu ' để an toàn
-    const escapeDrawtext = (text: string): string =>
-      text
-        .replace(/\\/g, "\\\\")
-        .replace(/\'/g, "\\\'")
-        .replace(/:/g, "\\:");
-
-    const topTextEsc = escapeDrawtext(topText);
-    const bannerTextEsc = escapeDrawtext(bottomBannerText);
-
-    // @0xFly_ — escape cẩn thận, đây là nguyên nhân bug cũ
-    const brandText = escapeDrawtext("@0xFly_");
-
-    // ─── Build filtergraph ────────────────────────────────────────────────────
-    // Mỗi filter cách nhau bằng dấu phẩy, không xuống dòng (tránh shell issue)
-    // drawbox phải đến TRƯỚC drawtext để text hiện trên nền đen
-    const videoFilters = [
-      // 0. Tăng tốc độ video (setpts) - đặt đầu tiên để tránh xung đột
-      `setpts=PTS/1.03`,
-      // 1a. Dải đen trên
-=======
     const top    = escText(topText);
     const banner = escText(bottomBannerText);
     const brand  = escText("@0xFly_");
 
     // Filter string — giữ nguyên syntax đã chạy OK trên Windows
     const filters = [
->>>>>>> d4d903cb8c2e42e7acdb7bb6aa3bcc5e721c95e2
       `drawbox=y=0:color=black@1:width=iw:height=${maskH}:t=fill`,
       `drawtext=fontfile='${font}':text='${top}':fontcolor=white:x=(w-text_w)/2:y=20`,
       `drawbox=y=ih-${maskH}:color=black@1:width=iw:height=${maskH}:t=fill`,
@@ -155,16 +118,6 @@ export async function maskVideo(
       `hue=h=${hueShift}`,
     ].join(",");
 
-<<<<<<< HEAD
-    // Audio filter: speed 1.03x để phá audio fingerprint
-    const audioFilter = `atempo=1.03`;
-
-    const ffmpegCmd = [
-      `ffmpeg`,
-      `-i "${inputPath}"`,
-      `-vf "${videoFilters}"`,
-      `-af "${audioFilter}"`,
-=======
     // Dùng filter_complex để sync video + audio speed trong 1 pass
     const cmd = [
       `ffmpeg`,
@@ -172,7 +125,6 @@ export async function maskVideo(
       `-filter_complex "[0:v]${filters},setpts=PTS/${speed}[v];[0:a]atempo=${speed}[a]"`,
       `-map "[v]"`,
       `-map "[a]"`,
->>>>>>> d4d903cb8c2e42e7acdb7bb6aa3bcc5e721c95e2
       `-c:v libx264`,
       `-preset fast`,
       `-crf 23`,
