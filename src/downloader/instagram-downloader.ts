@@ -1,6 +1,6 @@
 // src/downloader/instagram-downloader.ts
 // Tải video từ Instagram (Reels + Posts)
-// Tự động dùng cookie file nếu có (VPS), không có thì thử không cần cookie (local)
+// v2.1: Thêm maskVideo() sau khi tải xong — đồng bộ với channel-downloader
 
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -8,26 +8,19 @@ import * as fs from "fs";
 import * as path from "path";
 import { config } from "../config";
 import { createLogger } from "../utils/logger";
+import { maskVideo } from "../utils/video-processor";
 import db from "../db";
 
 const execAsync = promisify(exec);
 const logger = createLogger("InstagramDL");
 
-// ─── Lấy cookie flag tự động ─────────────────────────────────────────────────
-// VPS: dùng file cookie
-// Local: thử không cần cookie trước (video public), fallback sang Chrome
-
 function getInstagramCookieFlag(): string {
-  // Ưu tiên 1: file cookie (VPS)
   if (config.instagramCookieFile && fs.existsSync(config.instagramCookieFile)) {
-    logger.info(`Dùng cookie file: ${config.instagramCookieFile}`);
+    logger.info(`Dung cookie file: ${config.instagramCookieFile}`);
     return `--cookies "${config.instagramCookieFile}"`;
   }
-  // Ưu tiên 2: Chrome (Windows/Mac local)
   return `--cookies-from-browser chrome`;
 }
-
-// ─── Lấy thông tin video ──────────────────────────────────────────────────────
 
 async function getVideoInfo(url: string) {
   const cookie = getInstagramCookieFlag();
@@ -42,12 +35,46 @@ async function getVideoInfo(url: string) {
       title: (info.title || info.description || "Instagram video") as string,
       duration: (info.duration || 0) as number,
     };
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
-// ─── Tải 1 video ─────────────────────────────────────────────────────────────
+// ─── Helper: mask video sau khi tải, trả về path cuối cùng ───────────────────
+async function maskAndSave(
+  rawPath: string,
+  videoId: string,
+  title: string,
+  originalUrl: string,
+  duration: number
+): Promise<void> {
+  const maskedPath = rawPath.replace(".mp4", "_masked.mp4");
+
+  logger.info(`Dang mask video: ${videoId}`);
+  const ok = await maskVideo(rawPath, maskedPath);
+
+  const finalPath = ok ? maskedPath : rawPath;
+
+  if (ok && fs.existsSync(rawPath)) {
+    try { fs.unlinkSync(rawPath); } catch {}
+  }
+
+  const stats = fs.statSync(finalPath);
+
+  await db.videoLibrary.upsert({
+    where: { originalUrl },
+    update: { status: "pending_caption", localPath: finalPath, title, duration, fileSize: stats.size },
+    create: {
+      source: "instagram",
+      originalUrl,
+      localPath: finalPath,
+      title,
+      duration,
+      fileSize: stats.size,
+      status: "pending_caption",
+    },
+  });
+
+  logger.success(`Registered (masked=${ok}): ${title.substring(0, 50)}`);
+}
 
 export async function downloadInstagramOne(url: string): Promise<boolean> {
   url = url.trim();
@@ -55,21 +82,18 @@ export async function downloadInstagramOne(url: string): Promise<boolean> {
 
   const existing = await db.videoLibrary.findUnique({ where: { originalUrl: url } });
   if (existing && existing.status !== "failed") {
-    logger.info(`Đã có sẵn, bỏ qua: ${url}`);
+    logger.info(`Da co san, bo qua: ${url}`);
     return true;
   }
 
-  logger.info(`Đang lấy thông tin: ${url}`);
+  logger.info(`Dang lay thong tin: ${url}`);
   const info = await getVideoInfo(url);
-
   if (!info) {
-    logger.error(`Không lấy được thông tin: ${url}`);
-    logger.error(`Kiểm tra: đã upload cookie Instagram chưa? (${config.instagramCookieFile || "chưa cấu hình"})`);
+    logger.error(`Khong lay duoc thong tin: ${url}`);
     return false;
   }
-
   if (info.duration > config.maxVideoDurationSec) {
-    logger.warn(`Video quá dài (${info.duration}s), bỏ qua`);
+    logger.warn(`Video qua dai (${info.duration}s), bo qua`);
     return false;
   }
 
@@ -77,39 +101,27 @@ export async function downloadInstagramOne(url: string): Promise<boolean> {
     fs.mkdirSync(config.videoDir, { recursive: true });
   }
 
-  const filePath = path.resolve(path.join(config.videoDir, `ig_${info.id}.mp4`));
+  const rawPath = path.resolve(path.join(config.videoDir, `ig_${info.id}.mp4`));
   const cookie = getInstagramCookieFlag();
 
   try {
-    logger.info(`Đang tải: ${info.title.substring(0, 60)}`);
-
+    logger.info(`Dang tai: ${info.title.substring(0, 60)}`);
     await execAsync(
       `yt-dlp ${cookie} ` +
       `-f "best[height<=720][ext=mp4]/best[height<=720]/best" ` +
-      `--merge-output-format mp4 ` +
-      `--no-playlist ` +
-      `--socket-timeout 60 ` +
-      `--retries 3 ` +
-      `--no-warnings ` +
-      `-o "${filePath}" ` +
-      `"${url}"`,
+      `--merge-output-format mp4 --no-playlist --socket-timeout 60 --retries 3 ` +
+      `--no-warnings -o "${rawPath}" "${url}"`,
       { maxBuffer: 10 * 1024 * 1024 }
     );
 
-    if (!fs.existsSync(filePath)) throw new Error("File không tồn tại sau tải");
+    if (!fs.existsSync(rawPath)) throw new Error("File khong ton tai sau tai");
 
-    const stats = fs.statSync(filePath);
-
-    await db.videoLibrary.upsert({
-      where: { originalUrl: url },
-      update: { status: "pending_caption", localPath: filePath, title: info.title, duration: info.duration, fileSize: stats.size },
-      create: { source: "instagram", originalUrl: url, localPath: filePath, title: info.title, duration: info.duration, fileSize: stats.size, status: "pending_caption" },
-    });
-
-    logger.success(`Tải xong: ${info.title.substring(0, 50)} (${(stats.size / 1024 / 1024).toFixed(1)}MB)`);
+    // ✅ Gọi maskVideo ngay sau khi tải xong
+    await maskAndSave(rawPath, info.id, info.title, url, info.duration);
     return true;
+
   } catch (err: any) {
-    logger.error(`Lỗi tải ${url}: ${err.message}`);
+    logger.error(`Loi tai ${url}: ${err.message}`);
     await db.videoLibrary.upsert({
       where: { originalUrl: url },
       update: { status: "failed" },
@@ -119,8 +131,6 @@ export async function downloadInstagramOne(url: string): Promise<boolean> {
   }
 }
 
-// ─── Tải full profile ─────────────────────────────────────────────────────────
-
 export async function downloadInstagramProfile(
   profileUrl: string,
   batchSize: number = 10
@@ -129,7 +139,7 @@ export async function downloadInstagramProfile(
     profileUrl = `https://www.instagram.com/${profileUrl.slice(1)}/`;
   }
 
-  logger.info(`Đang quét profile: ${profileUrl}`);
+  logger.info(`Dang quet profile: ${profileUrl}`);
 
   const historyFile = "data/downloaded-history.txt";
   const history = fs.existsSync(historyFile)
@@ -140,11 +150,7 @@ export async function downloadInstagramProfile(
 
   try {
     const { stdout } = await execAsync(
-      `yt-dlp ${cookie} ` +
-      `--flat-playlist --dump-json ` +
-      `--playlist-end 50 ` +
-      `--no-warnings ` +
-      `"${profileUrl}"`,
+      `yt-dlp ${cookie} --flat-playlist --dump-json --playlist-end 50 --no-warnings "${profileUrl}"`,
       { maxBuffer: 20 * 1024 * 1024 }
     );
 
@@ -159,15 +165,11 @@ export async function downloadInstagramProfile(
       } catch { return null; }
     }).filter(Boolean) as Array<{ id: string; url: string; title: string }>;
 
-    logger.info(`Tìm thấy ${videos.length} video trên profile`);
+    logger.info(`Tim thay ${videos.length} video tren profile`);
 
     const newVideos = videos.filter(v => !history.has(`ig_${v.id}`));
-    logger.info(`${newVideos.length} video chưa tải`);
-
-    if (newVideos.length === 0) {
-      logger.info("Profile này đã tải hết rồi!");
-      return 0;
-    }
+    logger.info(`${newVideos.length} video chua tai`);
+    if (newVideos.length === 0) { logger.info("Profile nay da tai het!"); return 0; }
 
     const batch = newVideos.slice(0, batchSize);
     let downloaded = 0;
@@ -183,11 +185,11 @@ export async function downloadInstagramProfile(
 
     logger.success(`Batch xong: ${downloaded}/${batch.length} video`);
     return downloaded;
+
   } catch (err: any) {
-    logger.error(`Lỗi quét profile: ${err.message}`);
+    logger.error(`Loi quet profile: ${err.message}`);
     if (err.message.includes("login") || err.message.includes("cookie") || err.message.includes("401")) {
-      logger.error(`Cookie Instagram không hợp lệ hoặc hết hạn!`);
-      logger.error(`Upload lại file cookie: ${config.instagramCookieFile || "chưa cấu hình INSTAGRAM_COOKIE_FILE"}`);
+      logger.error(`Cookie Instagram khong hop le hoac het han!`);
     }
     return 0;
   }
