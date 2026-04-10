@@ -1,6 +1,6 @@
 // src/utils/video-processor.ts
 // Xử lý video: Che logo cũ, chèn overlay thương hiệu @0xFly_, chống copyright
-// v3.5: Fix font path Ubuntu, escape ký tự ffmpeg, thêm zoom/hue/speed trong 1 lệnh
+// v3.9: Fix lỗi video output bị hỏng (corrupted) do FFmpeg filtergraph
 
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -91,18 +91,17 @@ export async function maskVideo(
     const topFontSize = Math.floor(h * 0.038);    // Font size text trên
     const bannerFontSize = Math.floor(h * 0.032); // Font size text dưới (banner)
     const brandFontSize = Math.floor(h * 0.045);  // Font size @0xFly_ (to hơn, dễ thấy)
-    const brandY = h - maskH + Math.floor(maskH * 0.35); // Nằm trong dải đen dưới
 
     // Random hue shift: -5 đến +5 độ
     const hueShift = (Math.random() * 10 - 5).toFixed(1);
 
     // ─── Escape text cho ffmpeg drawtext ─────────────────────────────────────
-    // ffmpeg drawtext dùng ':' và "'" làm ký tự đặc biệt — phải escape
+    // ffmpeg drawtext dùng ":" và "'" làm ký tự đặc biệt — phải escape
     // '@' và '_' thì KHÔNG cần escape nhưng cần bọc trong dấu ' để an toàn
     const escapeDrawtext = (text: string): string =>
       text
         .replace(/\\/g, "\\\\")
-        .replace(/'/g, "\\'")
+        .replace(/\'/g, "\\\'")
         .replace(/:/g, "\\:");
 
     const topTextEsc = escapeDrawtext(topText);
@@ -115,6 +114,8 @@ export async function maskVideo(
     // Mỗi filter cách nhau bằng dấu phẩy, không xuống dòng (tránh shell issue)
     // drawbox phải đến TRƯỚC drawtext để text hiện trên nền đen
     const videoFilters = [
+      // 0. Tăng tốc độ video (setpts) - đặt đầu tiên để tránh xung đột
+      `setpts=PTS/1.03`,
       // 1a. Dải đen trên
       `drawbox=y=0:color=black@1:width=iw:height=${maskH}:t=fill`,
       // 1b. Text trên (nằm giữa dải đen)
@@ -133,7 +134,6 @@ export async function maskVideo(
     ].join(",");
 
     // Audio filter: speed 1.03x để phá audio fingerprint
-    // Không dùng atempo để tránh artifact — dùng trực tiếp qua pts
     const audioFilter = `atempo=1.03`;
 
     const ffmpegCmd = [
@@ -141,7 +141,6 @@ export async function maskVideo(
       `-i "${inputPath}"`,
       `-vf "${videoFilters}"`,
       `-af "${audioFilter}"`,
-      `-filter:v:0 setpts=PTS/1.03`,   // Sync video speed với audio
       `-c:v libx264`,
       `-preset fast`,
       `-crf 23`,
