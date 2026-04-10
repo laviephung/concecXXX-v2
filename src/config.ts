@@ -35,6 +35,8 @@ export const config = {
   publishSlot1Videos: parseInt(optional("PUBLISH_SLOT_1_VIDEOS", "3")),
   publishSlot2Hour: parseInt(optional("PUBLISH_SLOT_2_HOUR", "20")),
   publishSlot2Videos: parseInt(optional("PUBLISH_SLOT_2_VIDEOS", "3")),
+  publishSlot3Hour: parseInt(optional("PUBLISH_SLOT_3_HOUR", "23")),
+  publishSlot3Videos: parseInt(optional("PUBLISH_SLOT_3_VIDEOS", "2")),
   publishIntervalMinutes: parseInt(optional("PUBLISH_INTERVAL_MINUTES", "30")),
   downloadConcurrency: parseInt(optional("DOWNLOAD_CONCURRENCY", "2")),
 

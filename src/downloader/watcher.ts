@@ -13,6 +13,8 @@ import { maskVideo } from "../utils/video-processor";
 
 const logger = createLogger("Watcher");
 
+const processingFiles = new Set<string>();
+
 export async function scanNewVideos() {
   if (!fs.existsSync(config.videoDir)) {
     await fsp.mkdir(config.videoDir, { recursive: true });
@@ -43,7 +45,13 @@ export async function scanNewVideos() {
     });
 
     if (!existing) {
-      logger.info(`Phát hiện video mới từ Sync: ${file}`);
+      if (processingFiles.has(filePath)) {
+        continue;
+      }
+      processingFiles.add(filePath);
+
+      try {
+        logger.info(`Phát hiện video mới từ Sync: ${file}`);
       
       let videoTitle = videoId; // Mặc định dùng videoId làm title
       // Đọc file .info.json nếu tồn tại
@@ -92,7 +100,11 @@ export async function scanNewVideos() {
         }
       });
       
+      
       logger.success(`Đã đăng ký video ${videoId} (Masked: ${ok}) với tiêu đề "${videoTitle}" vào hàng đợi xử lý.`);
+      } finally {
+        processingFiles.delete(filePath);
+      }
     } // end if(!existing)
   } // end for
 } // end scanNewVideos

@@ -116,6 +116,8 @@ export function startScheduler() {
   const slot2Hour = config.publishSlot2Hour;
   const slot1Videos = config.publishSlot1Videos;
   const slot2Videos = config.publishSlot2Videos;
+  const slot3Hour = config.publishSlot3Hour;
+  const slot3Videos = config.publishSlot3Videos;
 
   // ─── Kiểm tra Shadowban định kỳ ───────────────────────────────────────────
   const checkBanJob = async () => {
@@ -176,7 +178,13 @@ export function startScheduler() {
   // ─── Khung giờ 2 ────────────────────────────────────────────────────────
   cron.schedule(`0 ${slot2Hour} * * *`, async () => {
     if (!getPublishingStatus()) return;
-    await startPublishQueue(slot2Videos, `Tối (${slot2Hour}:00)`);
+    await startPublishQueue(slot2Videos, `Chiều/Tối (${slot2Hour}:00)`);
+  });
+
+  // ─── Khung giờ 3 ────────────────────────────────────────────────────────
+  cron.schedule(`0 ${slot3Hour} * * *`, async () => {
+    if (!getPublishingStatus()) return;
+    await startPublishQueue(slot3Videos, `Đêm (${slot3Hour}:00)`);
   });
 
   // 🎲 FIX v2.5: Đăng bài văn bản ngẫu nhiên rải rác trong ngày (Tối thiểu 12 tiếng/lần)
@@ -227,7 +235,8 @@ export function startScheduler() {
     `  🔍 Watcher Sync : mỗi 1 phút\n` +
     `  📝 Tạo caption  : mỗi 2 phút\n` +
     `  📤 Khung sáng   : ${slot1Hour}:00 → ${slot1Videos} video\n` +
-    `  📤 Khung tối    : ${slot2Hour}:00 → ${slot2Videos} video\n` +
+    `  📤 Khung chiều  : ${slot2Hour}:00 → ${slot2Videos} video\n` +
+    `  📤 Khung đêm    : ${slot3Hour}:00 → ${slot3Videos} video\n` +
     `  ⏱️  Cách nhau    : ~${config.publishIntervalMinutes} phút (Random Delay)\n` +
     `  🎲 Bài đăng Text: Tối thiểu 12 tiếng/lần (Xác suất 25%/giờ)\n` +
     `  🛡️  Shadowban Check: Mỗi 6 giờ\n` +
