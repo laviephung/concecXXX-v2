@@ -15,7 +15,7 @@ const execAsync = promisify(exec);
 const logger = createLogger("ChannelDL");
 
 const HISTORY_FILE = "data/downloaded-history.txt";
-const BATCH_SIZE = 10;
+const BATCH_SIZE = 1;
 
 function getYoutubeCookieFlag(): string {
   if (config.youtubeCookieFile && fs.existsSync(config.youtubeCookieFile)) {

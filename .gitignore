@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+data/
+bot.db
+channels.txt
+logs/
+*.mp4
+*.mkv

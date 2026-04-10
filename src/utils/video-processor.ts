@@ -11,8 +11,10 @@ import { createLogger } from "./logger";
 const execAsync = promisify(exec);
 const logger = createLogger("VideoProcessor");
 
-// ─── Font path Ubuntu VPS ─────────────────────────────────────────────────────
-const UBUNTU_FONT_PATHS = [
+// ─── Font path (Hỗ trợ cả Ubuntu VPS và Windows Local) ─────────────────────────
+const CROSS_PLATFORM_FONT_PATHS = [
+  "C:/Windows/Fonts/arial.ttf",
+  "C:/Windows/Fonts/consola.ttf",
   "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
   "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
   "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
@@ -21,19 +23,23 @@ const UBUNTU_FONT_PATHS = [
 ];
 
 function getAvailableFont(): string {
-  for (const fontPath of UBUNTU_FONT_PATHS) {
+  for (const fontPath of CROSS_PLATFORM_FONT_PATHS) {
     if (fs.existsSync(fontPath)) {
       logger.info(`Font: ${fontPath}`);
       return fontPath;
     }
   }
   logger.warn("Khong tim thay font! Chay: apt-get install -y fonts-dejavu-core && fc-cache -fv");
-  return UBUNTU_FONT_PATHS[0]; // fallback, bot khong crash
+  return CROSS_PLATFORM_FONT_PATHS[2]; // fallback, bot khong crash
 }
 
-// ─── Linux font path: KHÔNG có drive letter, chỉ cần giữ nguyên ──────────────
+// ─── Xử lý đường dẫn font cho ffmpeg (Hỗ trợ C:/Windows/...) ──────────────────
 // (Windows cần strip "C:", Linux path /usr/share/... dùng thẳng được)
 function escapeFontPath(p: string): string {
+  // ffmpeg trên Windows yêu cầu escape dấu hai chấm của ổ đĩa khi dùng fontfile
+  if (p.match(/^[a-zA-Z]:/)) {
+    return p.replace(/\\/g, "/").replace(/^([a-zA-Z]):/, "$1\\:");
+  }
   return p; // Linux path không cần xử lý gì thêm
 }
 
@@ -106,13 +112,18 @@ export async function maskVideo(
     const banner = escText(bottomBannerText);
     const brand  = escText("@0xFly_");
 
+    // Tính toán kích cỡ font động theo chiều ngang của video
+    const mainFontSize   = Math.floor(w / 18);
+    const bannerFontSize = Math.floor(w / 23); // Chữ bên dưới dài hơn nên để bé hơn một chút
+    const brandFontSize  = Math.floor(w / 28);
+
     // Filter string — giữ nguyên syntax đã chạy OK trên Windows
     const filters = [
       `drawbox=y=0:color=black@1:width=iw:height=${maskH}:t=fill`,
-      `drawtext=fontfile='${font}':text='${top}':fontcolor=white:x=(w-text_w)/2:y=20`,
+      `drawtext=fontfile='${font}':text='${top}':fontsize=${mainFontSize}:fontcolor=white:x=(w-text_w)/2:y=(${maskH}-text_h)/2`,
       `drawbox=y=ih-${maskH}:color=black@1:width=iw:height=${maskH}:t=fill`,
-      `drawtext=fontfile='${font}':text='${banner}':fontcolor=yellow:x=(w-text_w)/2:y=h-${maskH}+20`,
-      `drawtext=fontfile='${font}':text='${brand}':fontcolor=white:x=w-text_w-20:y=h-text_h-20`,
+      `drawtext=fontfile='${font}':text='${banner}':fontsize=${bannerFontSize}:fontcolor=yellow:x=(w-text_w)/2:y=h-${maskH}+(${maskH}-text_h)/2`,
+      `drawtext=fontfile='${font}':text='${brand}':fontsize=${brandFontSize}:fontcolor=white:x=w-text_w-20:y=h-text_h-20`,
       `scale=${Math.floor(w * 1.02)}:${Math.floor(h * 1.02)}`,
       `crop=${w}:${h}`,
       `hue=h=${hueShift}`,
