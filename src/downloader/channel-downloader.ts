@@ -63,7 +63,7 @@ async function downloadVideo(videoUrl: string, videoId: string): Promise<string 
   if (!fs.existsSync(config.videoDir)) {
     fs.mkdirSync(config.videoDir, { recursive: true });
   }
-  const filePath = path.resolve(path.join(config.videoDir, `${videoId}.mp4`));
+  const filePath = path.resolve(path.join(config.videoDir, `${videoId}_c.mp4`));
   const cookie = getYoutubeCookieFlag();
   try {
     await execAsync(
