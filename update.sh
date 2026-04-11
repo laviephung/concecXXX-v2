@@ -1,22 +1,19 @@
 #!/bin/bash
 
-# Script tự động cập nhật Bot v2.0 cho VPS
-# Cách dùng: chmod +x update.sh && ./update.sh
+# Script tá»± Ä‘á»™ng cáº­p nháº­t Bot v2.0 cho VPS
+# CÃ¡ch dÃ¹ng: chmod +x update.sh && ./update.sh
 
-echo "🚀 Bắt đầu cập nhật Bot v2.0..."
+echo "ðŸš€ Báº¯t Ä‘áº§u cáº­p nháº­t Bot v2.0..."
 
-# 1. Kéo code mới nhất từ GitHub
-
-echo "📥 Đang kéo code mới nhất từ GitHub..."
+# 1. KÃ©o code má»›i nháº¥t tá»« GitHub
+echo "ðŸ“¥ Äang kÃ©o code má»›i nháº¥t tá»« GitHub..."
 git pull origin main
 
-# 2. Cài đặt thêm thư viện mới (nếu có)
-echo "📦 Đang cài đặt các gói thư viện mới..."
-npm install
-
-# 3. Cập nhật Database (nếu có thay đổi Schema)
-echo "🗄️ Đang cập nhật Database..."
+# 3. Cáº­p nháº­t Database (náº¿u cÃ³ thay Ä‘á»•i Schema)
+echo "ðŸ—„ï¸ Äang cáº­p nháº­t Database..."
 npx prisma generate
 npx prisma db push
 
+# 4. Khá»Ÿi Ä‘á»™ng láº¡i Bot trÃªn PM2
+echo "ðŸ”„ Äang khá»Ÿi Ä‘á»™ng láº¡i Bot trÃªn PM2..."
 npm run dev
