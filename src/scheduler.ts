@@ -14,6 +14,7 @@ import { getPublishingStatus } from "./bot/telegram-bot";
 import { scanNewVideos } from "./downloader/watcher";
 import { generateFunnyText } from "./processor/text-generator";
 import { checkShadowban, ShadowbanStatus } from "./utils/shadowban-checker";
+import { runFullAdvancedCleanup } from "./utils/advanced-cleanup";
 import TelegramBot from "node-telegram-bot-api";
 
 const logger = createLogger("Scheduler");
@@ -228,6 +229,12 @@ export function startScheduler() {
   cron.schedule("0 * * * *", async () => {
     try { await cleanupPublishedVideos(); }
     catch (err: any) { logger.error(`Cleanup job lỗi: ${err.message}`); }
+  });
+
+  // ─── Tự động dọn dẹp file rác và db (Mỗi 12 giờ) ─────────────────────────
+  cron.schedule("0 */12 * * *", async () => {
+    try { await runFullAdvancedCleanup(); }
+    catch (err: any) { logger.error(`Advanced Cleanup job lỗi: ${err.message}`); }
   });
 
   logger.success(

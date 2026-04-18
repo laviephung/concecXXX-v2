@@ -8,6 +8,7 @@ import { downloadOne, getVideoStats } from "../downloader/video-downloader";
 import { downloadAllChannels, cleanupPublishedVideos, getDiskUsage } from "../downloader/channel-downloader";
 import { downloadInstagramOne, downloadInstagramProfile } from "../downloader/instagram-downloader";
 import { triggerPublishNow, checkBanNow, downloadAllChannels } from "../scheduler";
+import { cleanupFailedVideos, runFullAdvancedCleanup } from "../utils/advanced-cleanup";
 import db from "../db";
 
 const logger = createLogger("TelegramBot");
@@ -22,6 +23,7 @@ export function startTelegramBot(): TelegramBot {
   bot.setMyCommands([
     { command: "start", description: "Hướng dẫn sử dụng" },
     { command: "status", description: "Thống kê kho video + dung lượng" },
+    { command: "storage", description: "Xem chi tiết dung lượng hệ thống" },
     { command: "checkban", description: "Kiểm tra Shadowban @0xFly_ 🛡️" },
     { command: "queue", description: "Xem hàng đợi chờ đăng" },
     { command: "recent", description: "Xem các tweet vừa đăng" },
@@ -29,6 +31,8 @@ export function startTelegramBot(): TelegramBot {
     { command: "crawlnow", description: "Tải batch video ngay bây giờ" },
     { command: "channels", description: "Danh sách kênh đang theo dõi" },
     { command: "cleanup", description: "Xóa file video đã đăng" },
+    { command: "clear_failed", description: "Xóa toàn bộ các file lỗi" },
+    { command: "clear_trash", description: "Dọn dẹp rác toàn bộ hệ thống" },
     { command: "pause", description: "Tạm dừng auto-publish" },
     { command: "resume", description: "Bật lại auto-publish" },
     { command: "retry", description: "Thử lại các video bị lỗi" }
@@ -65,7 +69,9 @@ export function startTelegramBot(): TelegramBot {
       `/checkban - Kiểm tra Shadowban 🛡️\n` +
       `/queue - Hàng đợi\n` +
       `/recent - Tweet gần đây\n` +
-      `/cleanup - Xóa file đã đăng\n\n` +
+      `/cleanup - Xóa file đã đăng\n` +
+      `/clear_failed - Xóa file video lỗi\n` +
+      `/clear_trash - Dọn rác toàn hệ thống\n\n` +
       `*⚙️ Điều khiển:*\n` +
       `/postnow - Đăng ngay 1 bài\n` +
       `/pause - Tạm dừng đăng\n` +
@@ -197,12 +203,50 @@ export function startTelegramBot(): TelegramBot {
     await reply(msg.chat.id, ok ? `✅ Đã thêm vào kho!` : `❌ Tải thất bại`);
   });
 
-  // ─── /cleanup ────────────────────────────────────────────────────────────
   bot.onText(/\/cleanup/, async (msg) => {
     if (!isAdmin(msg.from?.id)) return;
     const deleted = await cleanupPublishedVideos();
     await reply(msg.chat.id,
       `🗑️ Đã xóa *${deleted}* file video đã đăng\n💾 Dung lượng còn lại: ${getDiskUsage()}`
+    );
+  });
+
+  // ─── /storage ────────────────────────────────────────────────────────────
+  bot.onText(/\/storage/, async (msg) => {
+    if (!isAdmin(msg.from?.id)) return;
+    const stats = await getVideoStats();
+    await reply(msg.chat.id,
+      `💾 *Dung lượng & Lưu trữ*\n\n` +
+      `📦 Trạng thái kho:\n` +
+      `  - Đang chờ/Sẵn sàng: ${stats.ready + stats.pending}\n` +
+      `  - Bị lỗi (Failed): ${stats.failed}\n` +
+      `  - Đã đăng (Published): ${stats.published}\n\n` +
+      `📁 Dung lượng chiếm dụng: *${getDiskUsage()}*\n\n` +
+      `💡 Gợi ý:\n` +
+      `  Dùng /clear_failed để xóa file lỗi\n` +
+      `  Dùng /clear_trash để dọn file rác côi cút`
+    );
+  });
+
+  // ─── /clear_failed ───────────────────────────────────────────────────────
+  bot.onText(/\/clear_failed/, async (msg) => {
+    if (!isAdmin(msg.from?.id)) return;
+    await reply(msg.chat.id, `⏳ Đang xóa toàn bộ file video bị lỗi (failed)...`);
+    const deleted = await cleanupFailedVideos(true);
+    await reply(msg.chat.id, `✅ Đã xóa ${deleted} video bị lỗi!\n💾 Dung lượng còn lại: ${getDiskUsage()}`);
+  });
+
+  // ─── /clear_trash ────────────────────────────────────────────────────────
+  bot.onText(/\/clear_trash/, async (msg) => {
+    if (!isAdmin(msg.from?.id)) return;
+    await reply(msg.chat.id, `⏳ Đang quét và dọn dẹp toàn bộ rác hệ thống...`);
+    const res = await runFullAdvancedCleanup();
+    await reply(msg.chat.id,
+      `✅ Dọn dẹp hoàn tất!\n` +
+      `🗑️ File côi cút (orphaned): -${res.orphaned}\n` +
+      `🗑️ File lỗi quá 3 ngày: -${res.failed}\n` +
+      `🗑️ Bản ghi lịch sử > 30 ngày: -${res.records}\n\n` +
+      `💾 Dung lượng còn lại: ${getDiskUsage()}`
     );
   });
 
